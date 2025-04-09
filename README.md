@@ -1,1 +1,1 @@
-# terraform-qa-action
+# ai-terraform-qa-action
