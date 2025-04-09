@@ -89,7 +89,10 @@ out
 
 # Nuxt.js build / generate output
 .nuxt
-dist
+# dist contains code and node modules compiled into a single file
+# This must be committed so that workflows that use this action have
+#   access to the node modules
+# dist
 
 # Gatsby files
 .cache/
