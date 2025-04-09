@@ -1,0 +1,9 @@
+name: "AI-Powered Terraform QA"
+description: "A GitHub Action to perform AI-powered quality assurance checks on Terraform configurations."
+inputs:
+  tf_apply_job:
+    description: "The name of the job that ran 'terraform apply'."
+    required: true
+runs:
+  using: "node20"
+  main: "index.js"

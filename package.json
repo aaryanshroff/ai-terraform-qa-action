@@ -1,0 +1,9 @@
+{
+    "name": "ai-terraform-qa",
+    "version": "1.0.0",
+    "main": "index.js",
+    "dependencies": {
+        "@actions/core": "^1.11.1",
+        "@octokit/rest": "^21.1.1"
+    }
+}
