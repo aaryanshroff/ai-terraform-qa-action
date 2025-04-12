@@ -4,6 +4,9 @@ inputs:
   tf_apply_job:
     description: "The name of the job that ran 'terraform apply'."
     required: true
+  gemini_api_key:
+    description: "The API key for Gemini"
+    required: true
 runs:
   using: "node20"
   main: "dist/index.js"
