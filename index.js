@@ -39,7 +39,7 @@ Logs: ${logs.slice(-3000)}`
         temperature: 0.1
       },
       safetySettings: [{
-        category: "HARM_CATEGORY_DANGEROUS",
+        category: "HARM_CATEGORY_DANGEROUS_CONTENT",
         threshold: "BLOCK_NONE"
       }],
       tools: [{
