@@ -1,0 +1,22 @@
+Run cd terraform/s3
+  cd terraform/s3
+  terraform apply -auto-approve tfplan
+  shell: /usr/bin/bash -e {0}
+  env:
+    AWS_DEFAULT_REGION: us-west-2
+    AWS_REGION: us-west-2
+    AWS_ACCESS_KEY_ID: ***
+    AWS_SECRET_ACCESS_KEY: ***
+    AWS_SESSION_TOKEN: ***
+    TERRAFORM_CLI_PATH: /home/runner/work/_temp/d8d3d1fa-caad-4c1a-8de1-a6d3bd4e3ff9
+aws_s3_bucket.bucket: Creating...
+aws_s3_bucket.bucket: Creation complete after 3s [id=ops-medic-20250419234332441200000001]
+aws_s3_bucket_versioning.bucket_versioning: Creating...
+aws_s3_bucket_versioning.bucket_versioning: Creation complete after 2s [id=ops-medic-20250419234332441200000001]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+bucket_arn = "arn:aws:s3:::ops-medic-20250419234332441200000001"
+bucket_name = "ops-medic-20250419234332441200000001"

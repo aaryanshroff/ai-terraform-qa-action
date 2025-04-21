@@ -1,12 +1,58 @@
-name: "AI-Powered Terraform QA"
-description: "A GitHub Action to perform AI-powered quality assurance checks on Terraform configurations."
+name: "QA Copilot for Infra"
+description: |
+  AI-powered infrastructure validation system that:
+  - Analyzes Terraform apply outputs
+  - Generates context-aware test commands
+  - Executes validation checks automatically
+  - Provides smart failure diagnostics
+brand:
+  icon: "shield-check"
+  color: "green"
+
 inputs:
   tf_apply_job:
-    description: "The name of the job that ran 'terraform apply'."
+    description: "Name of GitHub job that ran 'terraform apply'"
     required: true
-  gemini_api_key:
-    description: "The API key for Gemini"
+    default: "apply"
+
+  llm_provider:
+    description: "AI service for test generation/execution"
     required: true
+    default: "gemini"
+    options:
+      - "openai"
+      - "anthropic"
+      - "gemini"
+
+  api_key:
+    description: "API key for chosen AI provider"
+    required: true
+    sensitive: true
+
+  failure_strategy:
+    description: "Behavior when tests fail"
+    required: false
+    default: "rollback"
+    options:
+      - "rollback"
+      - "alert-only"
+      - "retry"
+
+outputs:
+  test_plan:
+    description: "Generated test sequence in JSON format"
+  execution_logs:
+    description: "Raw output of test executions"
+  exit_codes:
+    description: "Map of test names to exit codes"
+  infrastructure_status:
+    description: "Final verdict (validated/needs_fixes)"
+
 runs:
-  using: "node20"
-  main: "dist/index.js"
+  using: "docker"
+  image: "Dockerfile"
+  args:
+    - "${{ inputs.tf_apply_job }}"
+    - "${{ inputs.llm_provider }}"
+    - "${{ inputs.api_key }}"
+    - "${{ inputs.failure_strategy }}"

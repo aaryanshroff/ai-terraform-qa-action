@@ -1,1 +1,1 @@
-# ai-terraform-qa-action
+# QA Copilot for Infra
