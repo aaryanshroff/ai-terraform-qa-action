@@ -1,13 +1,12 @@
-name: "QA Copilot for Infra"
+name: "Heimdall"
 description: |
-  AI-powered infrastructure validation system that:
-  - Analyzes Terraform apply outputs
-  - Generates context-aware test commands
-  - Executes validation checks automatically
-  - Provides smart failure diagnostics
+  The watchful guardian of cloud infrastructure:
+  - AI-powered Terraform validation
+  - Real-time security scanning
+  - Deployment integrity checks
 brand:
-  icon: "shield-check"
-  color: "green"
+  icon: "shield"
+  color: "blue-purple"
 
 inputs:
   tf_apply_job:
