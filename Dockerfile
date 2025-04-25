@@ -7,6 +7,14 @@ ENV \
     # Disable stdout buffering for real-time CI logs
     PYTHONUNBUFFERED=1
 
+# Install system dependencies and clean up (in one layer to minimize image size)
+RUN apt-get update && apt-get install -y \
+    # Avoid non-essential dependencies
+    --no-install-recommends \
+    curl \
+    # Remove package lists to reduce final image size
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Poetry - explicit version prevents breaking changes
 RUN curl -sSL https://install.python-poetry.org | python3 - --version $POETRY_VERSION
 
