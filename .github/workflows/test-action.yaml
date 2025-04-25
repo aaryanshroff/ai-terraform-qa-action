@@ -1,0 +1,73 @@
+name: "Validate Heimdall Action"
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/test-action.yml"
+      - "src/**"
+      - "test/**"
+      - "Dockerfile"
+      - "action.yaml"
+
+jobs:
+  infrastructure-validation:
+    name: "Validate Terraform Security"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: heimdall-test
+    
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "Setup Terraform"
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.11.3"
+          terraform_wrapper: false
+
+      - name: "Initialize Test Infrastructure"
+        working-directory: ./test/infra
+        env:
+          AWS_REGION: "us-west-2"
+        run: |
+          terraform init -input=false
+          terraform validate
+
+      - name: "Deploy Test Resources"
+        id: deploy
+        working-directory: ./test/infra
+        run: |
+          terraform apply -auto-approve -input=false
+          echo "TF_OUTPUT=$(terraform output -json)" >> $GITHUB_OUTPUT
+
+      - name: "Validate Infrastructure Security"
+        uses: ./ # Local action reference
+        id: security-check
+        with:
+          tf_apply_job: "deploy"
+          llm_provider: "gemini"
+          api_key: "${{ vars.HEIMDALL_TEST_KEY }}"
+          failure_strategy: "alert-only"
+        env:
+          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+
+      - name: "Evaluate Validation Results"
+        if: always()
+        run: |
+          if [[ "${{ steps.security-check.outputs.infrastructure_status }}" != "validated" ]]; then
+            echo "::error::Validation failed: ${{ steps.security-check.outputs.execution_logs }}"
+            exit 1
+          fi
+          echo "✅ Infrastructure validation passed"
+
+      - name: "Destroy Test Resources"
+        if: always()
+        working-directory: ./test/infra
+        run: terraform destroy -auto-approve -input=false
