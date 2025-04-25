@@ -1,0 +1,88 @@
+name: "Release Heimdall Action"
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    branches: ["main"]
+    paths: 
+      - "src/**"
+      - "Dockerfile"
+      - "action.yml"
+
+jobs:
+  publish:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: "Checkout code"
+        uses: "actions/checkout@v4"
+        with:
+          fetch-depth: "0"
+
+      - name: "Validate Action Metadata"
+        uses: "actions/action-validator@v1"
+        with:
+          file: "./action.yml"
+
+      - name: "Bump Version"
+        uses: "mathieudutour/github-tag-action@v6"
+        id: "tag_version"
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          initial-version: "0.1.0"
+
+      - name: "Build Action Image"
+        run: "docker build -t heimdall-action ."
+
+      - name: "Generate Release Notes"
+        id: "generate_notes"
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          # Install jq for JSON processing
+          sudo apt-get install -y jq
+          
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          # Generate changelog between tags
+          if [ -z "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)")
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD)
+          fi
+          
+          # Create final body
+          BODY="### What's Changed\n${CHANGELOG}\n"
+          
+          # Set output
+          echo "body=${BODY}" >> $GITHUB_OUTPUT
+
+      - name: "Create GitHub Release"
+        uses: "softprops/action-gh-release@v1"
+        with:
+          tag_name: "${{ steps.tag_version.outputs.new_tag }}"
+          name: "Heimdall ${{ steps.tag_version.outputs.new_tag }}"
+          body: |
+            ${{ steps.generate_notes.outputs.body }}
+            
+            ### GitHub Action Usage
+            ```yaml
+            - name: "AI Infrastructure Validation"
+              uses: "aaryanshroff/heimdall-ai@${{ steps.tag_version.outputs.new_tag }}"
+              with:
+                tf_apply_job: "prod-deploy"       # Your terraform apply job name
+                llm_provider: "gemini"            # gemini|openai|anthropic
+                api_key: "${{ secrets.HEIMDALL_API_KEY }}"
+                failure_strategy: "rollback"      # rollback|alert-only|retry
+            ```
+            
+            ### Required Secrets Setup
+            ```bash
+            # Add API key to repository secrets
+            gh secret set HEIMDALL_API_KEY --body="your-llm-api-key"
+            ```
+            
+            ### Marketplace Entry
+            [![Heimdall AI](https://img.shields.io/badge/GitHub%20Marketplace-Heimdall_AI-blue.svg)](https://github.com/marketplace/actions/heimdall-ai)
+          draft: false
+          prerelease: true
