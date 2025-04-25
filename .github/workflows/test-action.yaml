@@ -2,7 +2,7 @@ name: "Validate Heimdall Action"
 
 on:
   pull_request:
-    branches: ["main"]
+    branches: ["master"]
     paths:
       - ".github/workflows/test-action.yml"
       - "src/**"
