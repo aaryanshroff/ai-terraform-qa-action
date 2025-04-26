@@ -129,6 +129,24 @@ def handle_failure(strategy: str) -> NoReturn:
         sys.exit(0)
 
 
+def log_arguments(args: argparse.Namespace) -> None:
+    """Log input arguments with sensitive data masking"""
+    print("##[group]⚙️ Input Arguments")
+
+    # Define sensitive fields to mask
+    SENSITIVE_FIELDS = {"api_key"}
+
+    for arg_name, arg_value in vars(args).items():
+        # Mask sensitive values
+        if arg_name in SENSITIVE_FIELDS:
+            masked_value = "***" + str(arg_value)[-4:] if arg_value else "******"
+            print(f"{arg_name.replace('_', ' ').title():<20}: {masked_value}")
+        else:
+            print(f"{arg_name.replace('_', ' ').title():<20}: {arg_value}")
+
+    print("##[endgroup]")
+
+
 def set_github_outputs(outputs: Dict[str, Any]) -> None:
     """Write outputs to GITHUB_OUTPUT"""
     with open(os.environ.get("GITHUB_OUTPUT", ""), "a") as f:
@@ -140,6 +158,8 @@ def main() -> None:
     """Main execution flow"""
     try:
         args = parse_arguments()
+        log_arguments(args)
+
         llm = get_llm(args.llm_provider, args.api_key)
 
         # Get Terraform outputs from environment
