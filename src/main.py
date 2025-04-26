@@ -26,7 +26,7 @@ def parse_arguments() -> argparse.Namespace:
         description="AI-Powered Infrastructure Validation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("tf_apply_job", help="Name of the Terraform apply job")
+    parser.add_argument("tf_output_path", help="Path to terraform output JSON file")
     parser.add_argument("llm_provider", choices=["openai", "anthropic", "gemini"])
     parser.add_argument("api_key", help="LLM provider API key")
     parser.add_argument("failure_strategy", choices=["rollback", "alert-only", "retry"])
@@ -143,7 +143,9 @@ def main() -> None:
         llm = get_llm(args.llm_provider, args.api_key)
 
         # Get Terraform outputs from environment
-        tf_output = json.loads(os.environ.get("TF_OUTPUT", "{}"))
+        with open(args.tf_output_path) as f:
+            tf_output = json.load(f)
+
         print("##[group]📄 Terraform Outputs")
         print(json.dumps(tf_output, indent=2))
         print("##[endgroup]")

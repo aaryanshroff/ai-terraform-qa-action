@@ -49,13 +49,13 @@ jobs:
         run: |
           terraform apply -auto-approve -input=false
           terraform output -json > tf_output.json
-          echo "TF_OUTPUT=$(cat tf_output.json)" >> $GITHUB_OUTPUT
+          echo "TF_OUTPUT_FILE=tf_output.json" >> $GITHUB_OUTPUT
 
       - name: "Validate Infrastructure Security"
         uses: ./
         id: security-check
         with:
-          tf_apply_job: "deploy"
+          tf_output_path: ${{ steps.deploy.outputs.TF_OUTPUT_FILE }}
           llm_provider: "gemini"
           api_key: "${{ secrets.HEIMDALL_TEST_KEY }}"
           failure_strategy: "alert-only"
