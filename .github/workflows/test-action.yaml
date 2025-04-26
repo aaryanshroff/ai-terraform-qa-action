@@ -6,7 +6,7 @@ on:
     paths:
       - ".github/workflows/test-action.yml"
       - "src/**"
-      - "test/**"
+      - "terraform/environments/test/**"
       - "Dockerfile"
       - "action.yaml"
 
@@ -15,15 +15,21 @@ jobs:
     name: "Validate Terraform Security"
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: heimdall-test
     
     permissions:
+      id-token: write  # For OIDC
       contents: read
-      id-token: write
 
     steps:
       - name: "Checkout repository"
         uses: actions/checkout@v4
+
+      - name: "Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_TEST_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: heimdall-test-${{ github.run_id }}
 
       - name: "Setup Terraform"
         uses: hashicorp/setup-terraform@v3
@@ -32,31 +38,26 @@ jobs:
           terraform_wrapper: false
 
       - name: "Initialize Test Infrastructure"
-        working-directory: ./test/infra
-        env:
-          AWS_REGION: "us-west-2"
+        working-directory: ./terraform/environments/test
         run: |
           terraform init -input=false
           terraform validate
 
       - name: "Deploy Test Resources"
         id: deploy
-        working-directory: ./test/infra
+        working-directory: ./terraform/environments/test
         run: |
           terraform apply -auto-approve -input=false
           echo "TF_OUTPUT=$(terraform output -json)" >> $GITHUB_OUTPUT
 
       - name: "Validate Infrastructure Security"
-        uses: ./ # Local action reference
+        uses: ./
         id: security-check
         with:
           tf_apply_job: "deploy"
           llm_provider: "gemini"
           api_key: "${{ vars.HEIMDALL_TEST_KEY }}"
           failure_strategy: "alert-only"
-        env:
-          AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
-          AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
 
       - name: "Evaluate Validation Results"
         if: always()
@@ -69,5 +70,5 @@ jobs:
 
       - name: "Destroy Test Resources"
         if: always()
-        working-directory: ./test/infra
+        working-directory: ./terraform/environments/test
         run: terraform destroy -auto-approve -input=false
