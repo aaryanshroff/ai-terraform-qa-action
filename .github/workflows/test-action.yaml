@@ -48,7 +48,6 @@ jobs:
         working-directory: ./terraform/environments/test
         run: |
           terraform apply -auto-approve -input=false
-          echo "TF_OUTPUT=$(terraform output -json)" >> $GITHUB_OUTPUT
 
       - name: "Validate Infrastructure Security"
         uses: ./
