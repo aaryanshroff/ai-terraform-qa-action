@@ -35,6 +35,19 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def get_job_logs(job_name: str) -> str:
+    """Retrieve raw logs from GitHub job"""
+    gh = Github(os.getenv("GITHUB_TOKEN"))
+    repo = gh.get_repo(os.getenv("GITHUB_REPOSITORY"))
+    run_id = int(os.getenv("GITHUB_RUN_ID"))
+
+    workflow_run = repo.get_workflow_run(run_id)
+    for job in workflow_run.jobs():
+        if job.name == job_name:
+            return job.logs().decode("utf-8")
+    raise ValueError(f"Job {job_name} not found")
+
+
 def get_llm(llm_provider: str, api_key: str) -> Any:
     """Initialize LLM with structured output support"""
     if llm_provider == "gemini":
@@ -48,56 +61,28 @@ def get_llm(llm_provider: str, api_key: str) -> Any:
     raise ValueError(f"Unsupported provider: {llm_provider}")
 
 
-def get_tf_outputs_from_logs(job_name: str) -> Dict[str, Any]:
-    """Retrieve Terraform outputs from GitHub job logs"""
-    gh = Github(os.getenv("GITHUB_TOKEN"))
-    repo = gh.get_repo(os.getenv("GITHUB_REPOSITORY"))
-    run_id = int(os.getenv("GITHUB_RUN_ID"))
-
-    workflow_run = repo.get_workflow_run(run_id)
-    for job in workflow_run.jobs():
-        if job.name == job_name:
-            log_url = job.logs_url()
-            break
-    else:
-        raise ValueError(f"Job {job_name} not found in current workflow run")
-
-    # Download and parse logs
-    response = requests.get(log_url)
-    response.raise_for_status()
-
-    # Extract TF outputs from logs (assuming they're marked)
-    outputs = {}
-    for line in response.text.split("\n"):
-        if "TF_OUTPUT:" in line:
-            outputs = json.loads(line.split("TF_OUTPUT:")[1].strip())
-            break
-
-    return outputs
-
-
-def generate_validation_commands(llm: Any, tf_output: Dict[str, Any]) -> List[str]:
-    """Generate validation commands using structured LLM output"""
+def generate_validation_commands(llm: Any, logs: str) -> List[str]:
+    """Generate validation commands from raw logs"""
     prompt = ChatPromptTemplate.from_template(
         """
-    Generate AWS CLI/jq commands to validate these resources:
-    {resources}
+    Analyze these Terraform execution logs and generate AWS CLI validation commands:
+    
+    {logs}
     
     Focus on:
-    - Security configurations
-    - Encryption status
-    - Public access
-    - Compliance with best practices
-    - Cost optimization opportunities
+    1. Resources created/modified
+    2. Security configurations
+    3. Network accessibility
+    4. Compliance checks
     
-    Return only executable bash commands in valid JSON format.
+    Return only executable bash commands in JSON format.
     """
     )
 
     try:
         structured_llm = llm.with_structured_output(ValidationCommands)
         chain = prompt | structured_llm
-        response = chain.invoke({"resources": json.dumps(tf_output)})
+        response = chain.invoke({"logs": logs})
         return response.commands
     except Exception as e:
         raise RuntimeError(f"Command generation failed: {str(e)}")
@@ -196,14 +181,17 @@ def main() -> None:
         with open(args.tf_output_path) as f:
             tf_output = json.load(f)
 
-        print("##[group]📥 Retrieving Terraform Outputs")
-        tf_output = get_tf_outputs_from_logs(args.tf_apply_job)
-        print(json.dumps(tf_output, indent=2))
+        # Get logs from Terraform apply job
+        print("##[group]📥 Retrieving Terraform Logs")
+        raw_logs = get_job_logs(args.tf_apply_job)
+        print(f"Retrieved {len(raw_logs.splitlines())} lines of logs")
         print("##[endgroup]")
 
         # Generate commands
         print("##[group]🤖 AI-Generated Validation Commands")
-        commands = generate_validation_commands(llm, tf_output)
+        commands = generate_validation_commands(
+            llm, raw_logs[:100000]
+        )  # Truncate to 100k chars
         print("\n".join([f"{i+1}. {cmd}" for i, cmd in enumerate(commands)]))
         print("##[endgroup]")
 
