@@ -28,7 +28,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_TEST_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: us-west-2
           role-session-name: heimdall-test-${{ github.run_id }}
 
       - name: "Setup Terraform"
