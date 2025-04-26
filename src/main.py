@@ -33,15 +33,17 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_llm(args: argparse.Namespace) -> Any:
+def get_llm(llm_provider: str, api_key: str) -> Any:
     """Initialize LLM with structured output support"""
-    if args.llm_provider == "gemini":
-        return ChatGoogleGenerativeAI(model="gemini-pro", temperature=0)
-    elif args.llm_provider == "openai":
-        return ChatOpenAI(model="gpt-4-turbo", temperature=0).bind(
+    if llm_provider == "gemini":
+        return ChatGoogleGenerativeAI(
+            model="gemini-pro", temperature=0, api_key=api_key
+        )
+    elif llm_provider == "openai":
+        return ChatOpenAI(model="gpt-4-turbo", temperature=0, api_key=api_key).bind(
             response_format={"type": "json_object"}
         )
-    raise ValueError(f"Unsupported provider: {args.llm_provider}")
+    raise ValueError(f"Unsupported provider: {llm_provider}")
 
 
 def generate_validation_commands(llm: Any, tf_output: Dict[str, Any]) -> List[str]:
@@ -110,7 +112,7 @@ def main() -> None:
     """Main execution flow"""
     try:
         args = parse_arguments()
-        llm = get_llm(args)
+        llm = get_llm(args.llm_provider, args.api_key)
 
         # Get Terraform outputs from environment
         tf_output = json.loads(os.environ.get("TF_OUTPUT", "{}"))
