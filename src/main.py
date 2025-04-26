@@ -43,6 +43,7 @@ def get_job_logs(job_name: str) -> str:
 
     workflow_run = repo.get_workflow_run(run_id)
     for job in workflow_run.jobs():
+        print("Job:", job_name)
         if job.name == job_name:
             return job.logs().decode("utf-8")
     raise ValueError(f"Job {job_name} not found")
