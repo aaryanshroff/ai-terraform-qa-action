@@ -1,140 +1,154 @@
-#!/usr/bin/env python3
 import argparse
 import json
 import os
+import subprocess
 import sys
-from typing import Any, Dict, List, NoReturn
+from typing import Any, Dict, List, NoReturn, Tuple
 
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from tabulate import tabulate
 
 
+# Structured output schema for command generation
+class ValidationCommands(BaseModel):
+    commands: List[str] = Field(
+        description="List of AWS CLI/jq commands for infrastructure validation",
+        examples=[["aws s3api get-bucket-encryption --bucket $BUCKET"]],
+    )
+
+
 def parse_arguments() -> argparse.Namespace:
-    """Parse command line arguments matching action.yml specs"""
+    """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description="QA Copilot for Infrastructure Validation",
+        description="AI-Powered Infrastructure Validation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-
-    parser.add_argument(
-        "tf_apply_job",
-        type=str,
-        help="Name of the GitHub Actions job that executed terraform apply",
-    )
-
-    parser.add_argument(
-        "llm_provider",
-        type=str.lower,
-        choices=["openai", "anthropic", "gemini"],
-        help="AI service provider for test generation",
-    )
-
-    parser.add_argument(
-        "api_key", type=str, help="API key for the selected LLM provider"
-    )
-
-    parser.add_argument(
-        "failure_strategy",
-        type=str.lower,
-        choices=["rollback", "alert-only", "retry"],
-        default="rollback",
-        help="Behavior when infrastructure validation fails",
-    )
-
+    parser.add_argument("tf_apply_job", help="Name of the Terraform apply job")
+    parser.add_argument("llm_provider", choices=["openai", "anthropic", "gemini"])
+    parser.add_argument("api_key", help="LLM provider API key")
+    parser.add_argument("failure_strategy", choices=["rollback", "alert-only", "retry"])
     return parser.parse_args()
 
 
-def validate_inputs(args: argparse.Namespace) -> None:
-    """Additional validation beyond argparse"""
-    if not args.api_key.strip():
-        raise ValueError("API key cannot be empty or whitespace")
-
-
-def set_github_outputs(outputs: Dict[str, Any]) -> None:
-    """Set GitHub Action outputs
-
-    Args:
-        outputs: Dictionary of output keys to values (must be JSON-serializable)
-    """
-    with open(os.environ.get("GITHUB_OUTPUT", ""), "a") as fh:
-        for key, value in outputs.items():
-            print(f"{key}={json.dumps(value)}", file=fh)
-
-
-def print_config(args: argparse.Namespace) -> None:
-    """Print formatted configuration table
-
-    Args:
-        args: Parsed command line arguments from parse_arguments()
-    """
-    headers: List[str] = ["Setting", "Value"]
-    table: List[List[str]] = [
-        ["Terraform Job", args.tf_apply_job],
-        ["AI Provider", args.llm_provider.capitalize()],
-        ["Failure Strategy", args.failure_strategy.capitalize()],
-        ["API Key", "***" if args.api_key else ""],
-    ]
-
-    print("##[group]📋 Configuration Summary")
-    print(
-        tabulate(
-            table,
-            headers=headers,
-            tablefmt="github",
-            colalign=("right", "left"),
+def get_llm(args: argparse.Namespace) -> Any:
+    """Initialize LLM with structured output support"""
+    if args.llm_provider == "gemini":
+        return ChatGoogleGenerativeAI(model="gemini-pro", temperature=0)
+    elif args.llm_provider == "openai":
+        return ChatOpenAI(model="gpt-4-turbo", temperature=0).bind(
+            response_format={"type": "json_object"}
         )
+    raise ValueError(f"Unsupported provider: {args.llm_provider}")
+
+
+def generate_validation_commands(llm: Any, tf_output: Dict[str, Any]) -> List[str]:
+    """Generate validation commands using structured LLM output"""
+    prompt = ChatPromptTemplate.from_template(
+        """
+    Generate AWS CLI/jq commands to validate these resources:
+    {resources}
+    
+    Focus on:
+    - Security configurations
+    - Encryption status
+    - Public access
+    - Compliance with best practices
+    - Cost optimization opportunities
+    
+    Return only executable bash commands in valid JSON format.
+    """
     )
-    print("##[endgroup]\n")
+
+    try:
+        structured_llm = llm.with_structured_output(ValidationCommands)
+        chain = prompt | structured_llm
+        response = chain.invoke({"resources": json.dumps(tf_output)})
+        return response.commands
+    except Exception as e:
+        raise RuntimeError(f"Command generation failed: {str(e)}")
+
+
+def execute_validation(commands: List[str]) -> List[Dict[str, Any]]:
+    """Execute generated commands safely"""
+    results = []
+    for cmd in commands:
+        try:
+            result = subprocess.run(
+                cmd, shell=True, check=True, timeout=30, capture_output=True, text=True
+            )
+            results.append(
+                {"command": cmd, "passed": True, "output": result.stdout.strip()}
+            )
+        except subprocess.CalledProcessError as e:
+            results.append(
+                {"command": cmd, "passed": False, "output": e.stderr.strip()}
+            )
+        except subprocess.TimeoutExpired:
+            results.append(
+                {"command": cmd, "passed": False, "output": "Command timed out"}
+            )
+    return results
+
+
+def handle_failure(strategy: str) -> NoReturn:
+    """Handle failure based on selected strategy"""
+    if strategy == "rollback":
+        print("🚨 Critical failure - initiating rollback")
+        sys.exit(1)
+    elif strategy == "retry":
+        print("🔄 Validation failed - restarting...")
+        sys.exit(2)
+    else:
+        print("⚠️ Validation failed - alerting team")
+        sys.exit(0)
 
 
 def main() -> None:
-    """Main execution flow with error handling"""
+    """Main execution flow"""
     try:
-        args: argparse.Namespace = parse_arguments()
-        validate_inputs(args)
-        print_config(args)
+        args = parse_arguments()
+        llm = get_llm(args)
 
-        # Simulate test execution
-        print("\n🔍 Analyzing terraform apply output...")
-        print("✅ Detected 3 AWS EC2 instances")
-        print("🛡️ Running security validation...")
+        # Get Terraform outputs from environment
+        tf_output = json.loads(os.environ.get("TF_OUTPUT", "{}"))
 
-        # Create typed mock outputs
-        outputs: Dict[str, Any] = {
-            "test_plan": {
-                "security_scan": "aws inspector scan",
-                "connectivity_check": "ping -c 4 <ip>",
-            },
-            "execution_logs": [
-                "Security scan completed - 0 vulnerabilities found",
-                "All instances responding to ping",
-            ],
-            "exit_codes": {"security_scan": 0, "connectivity_check": 0},
-            "infrastructure_status": "validated",
-        }
+        # Generate and execute validation commands
+        commands = generate_validation_commands(llm, tf_output)
+        results = execute_validation(commands)
 
-        set_github_outputs(outputs)
-        print("\n🎉 Success: Infrastructure validation passed!")
+        # Prepare outputs
+        exit_codes = {f"check_{i}": int(not r["passed"]) for i, r in enumerate(results)}
+        passed = all(r["passed"] for r in results)
 
-    except argparse.ArgumentError as e:
-        handle_error(f"Invalid input: {str(e)}", debug_hint="Check workflow inputs")
-    except ValueError as e:
-        handle_error(f"Validation error: {str(e)}")
+        set_github_outputs(
+            {
+                "test_plan": [r["command"] for r in results],
+                "execution_logs": [
+                    f"{'PASS' if r['passed'] else 'FAIL'}: {r['command']}"
+                    for r in results
+                ],
+                "exit_codes": exit_codes,
+                "success_rate": sum(r["passed"] for r in results) / len(results),
+                "infrastructure_status": "validated" if passed else "needs_fixes",
+            }
+        )
+
+        if not passed:
+            handle_failure(args.failure_strategy)
+
     except Exception as e:
-        handle_error(f"Unexpected error: {str(e)}")
+        print(f"##[error]❌ Critical error: {str(e)}")
+        sys.exit(1)
 
 
-def handle_error(message: str, debug_hint: str = "", exit_code: int = 1) -> NoReturn:
-    """Standardized error handling
-
-    Args:
-        message: Primary error message
-        debug_hint: Troubleshooting suggestion
-        exit_code: Process exit code (default 1)
-    """
-    print(f"##[error]❌ {message}")
-    if debug_hint:
-        print(f"##[debug] {debug_hint}")
-    sys.exit(exit_code)
+def set_github_outputs(outputs: Dict[str, Any]) -> None:
+    """Write outputs to GITHUB_OUTPUT"""
+    with open(os.environ.get("GITHUB_OUTPUT", ""), "a") as f:
+        for key, value in outputs.items():
+            f.write(f"{key}={json.dumps(value)}\n")
 
 
 if __name__ == "__main__":
