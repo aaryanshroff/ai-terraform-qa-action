@@ -48,12 +48,13 @@ jobs:
         working-directory: ./terraform/environments/test
         run: |
           terraform apply -auto-approve -input=false
+          terraform output -json > tf_output.json
 
       - name: "Validate Infrastructure Security"
         uses: ./
         id: security-check
         with:
-          tf_apply_job: "deploy"
+          tf_apply_job: deploy
           llm_provider: "gemini"
           api_key: "${{ secrets.HEIMDALL_TEST_KEY }}"
           failure_strategy: "alert-only"
