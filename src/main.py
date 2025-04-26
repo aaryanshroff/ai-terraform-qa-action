@@ -5,6 +5,8 @@ import subprocess
 import sys
 from typing import Any, Dict, List, NoReturn, Tuple
 
+import requests
+from github import Github
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
@@ -26,7 +28,7 @@ def parse_arguments() -> argparse.Namespace:
         description="AI-Powered Infrastructure Validation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("tf_output_path", help="Path to terraform output JSON file")
+    parser.add_argument("tf_apply_job", help="Name of the Terraform apply job")
     parser.add_argument("llm_provider", choices=["openai", "anthropic", "gemini"])
     parser.add_argument("api_key", help="LLM provider API key")
     parser.add_argument("failure_strategy", choices=["rollback", "alert-only", "retry"])
@@ -44,6 +46,34 @@ def get_llm(llm_provider: str, api_key: str) -> Any:
             response_format={"type": "json_object"}
         )
     raise ValueError(f"Unsupported provider: {llm_provider}")
+
+
+def get_tf_outputs_from_logs(job_name: str) -> Dict[str, Any]:
+    """Retrieve Terraform outputs from GitHub job logs"""
+    gh = Github(os.getenv("GITHUB_TOKEN"))
+    repo = gh.get_repo(os.getenv("GITHUB_REPOSITORY"))
+    run_id = int(os.getenv("GITHUB_RUN_ID"))
+
+    workflow_run = repo.get_workflow_run(run_id)
+    for job in workflow_run.jobs():
+        if job.name == job_name:
+            log_url = job.logs_url()
+            break
+    else:
+        raise ValueError(f"Job {job_name} not found in current workflow run")
+
+    # Download and parse logs
+    response = requests.get(log_url)
+    response.raise_for_status()
+
+    # Extract TF outputs from logs (assuming they're marked)
+    outputs = {}
+    for line in response.text.split("\n"):
+        if "TF_OUTPUT:" in line:
+            outputs = json.loads(line.split("TF_OUTPUT:")[1].strip())
+            break
+
+    return outputs
 
 
 def generate_validation_commands(llm: Any, tf_output: Dict[str, Any]) -> List[str]:
@@ -166,7 +196,8 @@ def main() -> None:
         with open(args.tf_output_path) as f:
             tf_output = json.load(f)
 
-        print("##[group]📄 Terraform Outputs")
+        print("##[group]📥 Retrieving Terraform Outputs")
+        tf_output = get_tf_outputs_from_logs(args.tf_apply_job)
         print(json.dumps(tf_output, indent=2))
         print("##[endgroup]")
 
