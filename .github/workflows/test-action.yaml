@@ -54,7 +54,7 @@ jobs:
         uses: ./
         id: security-check
         with:
-          tf_output_path: "terraform/environments/test/tf_output.json"
+          tf_apply_job: deploy
           llm_provider: "gemini"
           api_key: "${{ secrets.HEIMDALL_TEST_KEY }}"
           failure_strategy: "alert-only"

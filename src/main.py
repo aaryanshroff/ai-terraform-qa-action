@@ -177,10 +177,6 @@ def main() -> None:
 
         llm = get_llm(args.llm_provider, args.api_key)
 
-        # Get Terraform outputs from environment
-        with open(args.tf_output_path) as f:
-            tf_output = json.load(f)
-
         # Get logs from Terraform apply job
         print("##[group]📥 Retrieving Terraform Logs")
         raw_logs = get_job_logs(args.tf_apply_job)
