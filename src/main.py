@@ -37,7 +37,7 @@ def get_llm(llm_provider: str, api_key: str) -> Any:
     """Initialize LLM with structured output support"""
     if llm_provider == "gemini":
         return ChatGoogleGenerativeAI(
-            model="gemini-pro", temperature=0, api_key=api_key
+            model="gemini-2.0-flash-exp", temperature=0, api_key=api_key
         )
     elif llm_provider == "openai":
         return ChatOpenAI(model="gpt-4-turbo", temperature=0, api_key=api_key).bind(
