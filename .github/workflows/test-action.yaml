@@ -55,7 +55,7 @@ jobs:
         with:
           tf_apply_job: "deploy"
           llm_provider: "gemini"
-          api_key: "${{ vars.HEIMDALL_TEST_KEY }}"
+          api_key: "${{ secrets.HEIMDALL_TEST_KEY }}"
           failure_strategy: "alert-only"
 
       - name: "Evaluate Validation Results"
