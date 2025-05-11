@@ -176,16 +176,10 @@ def get_job_logs(job_name: str) -> str:
     )
     zip_content_bytes: bytes
     try:
-        # Use the job's underlying requester to fetch the logs.
-        # The logs_url for a job points to an API endpoint that typically redirects to the actual log archive.
-        # requestBlob is expected to handle authentication and follow redirects, returning a requests.Response object.
-        github_api_headers = target_job._requester.headers.copy()
-
-        print(f"Requesting log archive from: {target_job.logs_url}")
+        print(f"Requesting log archive from: {target_job.logs_url()}")
 
         log_download_response = requests.get(
-            target_job.logs_url,
-            headers=github_api_headers,
+            target_job.logs_url(),
             timeout=(
                 10,
                 180,
@@ -211,7 +205,7 @@ def get_job_logs(job_name: str) -> str:
         print(f"HTTP error {e.response.status_code} for URL: {url_errored}")
         print(f"Response content (first 500 chars): {e.response.text[:500]}...")
         # Check if the error was from the original GitHub URL or the redirected one
-        if target_job.logs_url in url_errored:
+        if target_job.logs_url() in url_errored:
             print("The error seems to be from the initial GitHub API logs_url.")
         else:
             print("The error seems to be from the redirected storage URL.")
