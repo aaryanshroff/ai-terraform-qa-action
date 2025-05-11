@@ -179,56 +179,57 @@ def get_job_logs(job_name: str) -> str:
         # Use the job's underlying requester to fetch the logs.
         # The logs_url for a job points to an API endpoint that typically redirects to the actual log archive.
         # requestBlob is expected to handle authentication and follow redirects, returning a requests.Response object.
-        log_zip_response_obj = target_job._requester.requestBlob(
-            "GET", target_job.logs_url()
+        github_api_headers = target_job._requester.headers.copy()
+
+        print(f"Requesting log archive from: {target_job.logs_url}")
+
+        log_download_response = requests.get(
+            target_job.logs_url,
+            headers=github_api_headers,
+            timeout=(
+                10,
+                180,
+            ),  # (connect_timeout, read_timeout) - 10s to connect, 180s to download
         )
 
-        # Check if the final download was successful (e.g., after following redirects)
-        log_zip_response_obj.raise_for_status()
+        # This will raise an HTTPError if the final download fails
+        log_download_response.raise_for_status()
 
-        zip_content_bytes = (
-            log_zip_response_obj.content
-        )  # Get the binary content from the response
+        zip_content_bytes = log_download_response.content
         print(
-            f"Successfully received log archive (Status: {log_zip_response_obj.status_code}, Size: {len(zip_content_bytes)} bytes)."
+            f"Successfully downloaded log archive (Final URL: {log_download_response.url}, Status: {log_download_response.status_code}, Size: {len(zip_content_bytes)} bytes)."
         )
 
-    except (
-        GithubException
-    ) as e:  # Raised by PyGithub for API errors (4xx, 5xx from GitHub)
-        error_message = (
-            e.data.get("message", "No specific message")
-            if isinstance(e.data, dict)
-            else str(e.data)
-        )
-        print(
-            f"GitHub API error when trying to get log zip for job ID {target_job.id} from {target_job.logs_url()}: Status {e.status}, Message: {error_message}"
-        )
-        if e.status == 403:
-            print(
-                "This typically indicates insufficient permissions. Ensure the GITHUB_TOKEN has 'actions:read' scope for this repository."
-            )
+    except requests.exceptions.Timeout as e:
+        url_timed_out = e.request.url
+        print(f"Timeout occurred while requesting: {url_timed_out}")
         raise RuntimeError(
-            f"Failed to get log zip due to GitHub API error: {e.status} - {error_message}"
+            f"Timeout while trying to download log zip (URL: {url_timed_out}): {e}"
         )
-    except (
-        requests.exceptions.HTTPError
-    ) as e:  # Raised by response.raise_for_status() for non-2xx statuses from the final download URL
-        print(
-            f"HTTP error when downloading log zip for job ID {target_job.id} (likely from redirected URL): {e.response.status_code}"
-        )
+    except requests.exceptions.HTTPError as e:
+        url_errored = e.request.url
+        print(f"HTTP error {e.response.status_code} for URL: {url_errored}")
         print(f"Response content (first 500 chars): {e.response.text[:500]}...")
-        raise RuntimeError(f"Failed to download log zip: HTTP {e.response.status_code}")
-    except (
-        requests.exceptions.RequestException
-    ) as e:  # Other requests-related errors (network, timeout, etc.)
+        # Check if the error was from the original GitHub URL or the redirected one
+        if target_job.logs_url in url_errored:
+            print("The error seems to be from the initial GitHub API logs_url.")
+        else:
+            print("The error seems to be from the redirected storage URL.")
+        raise RuntimeError(
+            f"Failed to download log zip due to HTTP error {e.response.status_code} from {url_errored}: {e}"
+        )
+    except requests.exceptions.RequestException as e:
+        url_errored = e.request.url if e.request else "Unknown URL"
         print(
-            f"Network or request error when trying to download log zip for job ID {target_job.id}: {type(e).__name__} - {e}"
+            f"Network or request error when trying to download log zip (URL: {url_errored}): {type(e).__name__} - {e}"
         )
         raise RuntimeError(f"Failed to download log zip due to a request error: {e}")
-    except Exception as e:  # Catch-all for other unexpected errors during download
+    except Exception as e:
+        print(
+            f"An unexpected error occurred in log download/processing for job ID {target_job.id}: {type(e).__name__} {e}"
+        )
         raise RuntimeError(
-            f"An unexpected error occurred while trying to get log zip for job ID {target_job.id}: {type(e).__name__} {e}"
+            f"An unexpected error occurred while trying to get/process log zip for job ID {target_job.id}: {type(e).__name__} {e}"
         )
 
     try:
