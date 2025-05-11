@@ -53,11 +53,11 @@ def parse_arguments() -> argparse.Namespace:
 def get_job_logs(job_name: str) -> str:
     """
     Retrieve raw logs from a specific GitHub Actions job.
-    This function fetches the logs by downloading a ZIP archive of the job's logs
-    and then extracting the textual content from the files within that archive.
+    This function fetches the logs by using the job's logs_url,
+    which redirects to a ZIP archive of the job's logs.
+    It then extracts the textual content from the files within that archive.
     """
     github_token = os.getenv("GITHUB_TOKEN")
-    # Fallback for specific GitHub Actions contexts if GITHUB_TOKEN is not directly available/sufficient
     if (
         not github_token
         and os.getenv("GITHUB_ACTIONS") == "true"
@@ -105,7 +105,7 @@ def get_job_logs(job_name: str) -> str:
         raise RuntimeError(
             f"GitHub API error when getting repository '{github_repository}': {e.status} {e.data}"
         )
-    except Exception as e:  # Catch any other unexpected errors during repo access
+    except Exception as e:
         raise RuntimeError(
             f"Failed to get repository '{github_repository}': {type(e).__name__} {e}"
         )
@@ -136,7 +136,7 @@ def get_job_logs(job_name: str) -> str:
 
     all_jobs_in_run = []
     try:
-        all_jobs_in_run = list(workflow_run.jobs())  # This makes an API call
+        all_jobs_in_run = list(workflow_run.jobs())
     except GithubException as e:
         raise RuntimeError(
             f"GitHub API error while listing jobs for run ID '{run_id}': {e.status} {e.data}"
@@ -153,7 +153,7 @@ def get_job_logs(job_name: str) -> str:
         if job.name == job_name:
             target_job = job
             print(
-                f"Found target job: '{target_job.name}' (ID: {target_job.id}, Status: '{target_job.status}')"
+                f"Found target job: '{target_job.name}' (ID: {target_job.id}, Status: '{target_job.status}', Logs URL: {target_job.logs_url})"
             )
             break
 
@@ -163,9 +163,7 @@ def get_job_logs(job_name: str) -> str:
         )
         for j_idx, j in enumerate(all_jobs_in_run):
             print(f"  {j_idx+1}. Name: '{j.name}', ID: {j.id}, Status: '{j.status}'")
-            if (
-                j_idx >= 19 and len(all_jobs_in_run) > 20
-            ):  # Limit output for very long lists
+            if j_idx >= 19 and len(all_jobs_in_run) > 20:
                 print(f"  ... and {len(all_jobs_in_run) - (j_idx+1)} more jobs.")
                 break
         raise ValueError(
@@ -174,24 +172,37 @@ def get_job_logs(job_name: str) -> str:
         )
 
     print(
-        f"Attempting to download logs for job '{target_job.name}' (ID: {target_job.id})."
+        f"Attempting to download logs for job '{target_job.name}' (ID: {target_job.id}) using logs_url: {target_job.logs_url}"
     )
+    zip_content_bytes: bytes
     try:
-        log_zip_response = (
-            target_job.get_logs_zip()
-        )  # This is a requests.Response object
-        log_zip_response.raise_for_status()
-        print(
-            f"Successfully received log archive (Status: {log_zip_response.status_code}, Size: {len(log_zip_response.content)} bytes)."
+        # Use the job's underlying requester to fetch the logs.
+        # The logs_url for a job points to an API endpoint that typically redirects to the actual log archive.
+        # requestBlob is expected to handle authentication and follow redirects, returning a requests.Response object.
+        log_zip_response_obj = target_job._requester.requestBlob(
+            "GET", target_job.logs_url
         )
-    except GithubException as e:
+
+        # Check if the final download was successful (e.g., after following redirects)
+        log_zip_response_obj.raise_for_status()
+
+        zip_content_bytes = (
+            log_zip_response_obj.content
+        )  # Get the binary content from the response
+        print(
+            f"Successfully received log archive (Status: {log_zip_response_obj.status_code}, Size: {len(zip_content_bytes)} bytes)."
+        )
+
+    except (
+        GithubException
+    ) as e:  # Raised by PyGithub for API errors (4xx, 5xx from GitHub)
         error_message = (
             e.data.get("message", "No specific message")
             if isinstance(e.data, dict)
             else str(e.data)
         )
         print(
-            f"GitHub API error when trying to get log zip for job ID {target_job.id}: Status {e.status}, Message: {error_message}"
+            f"GitHub API error when trying to get log zip for job ID {target_job.id} from {target_job.logs_url}: Status {e.status}, Message: {error_message}"
         )
         if e.status == 403:
             print(
@@ -200,19 +211,28 @@ def get_job_logs(job_name: str) -> str:
         raise RuntimeError(
             f"Failed to get log zip due to GitHub API error: {e.status} - {error_message}"
         )
-    except requests.exceptions.HTTPError as e:
+    except (
+        requests.exceptions.HTTPError
+    ) as e:  # Raised by response.raise_for_status() for non-2xx statuses from the final download URL
         print(
-            f"HTTP error when downloading log zip for job ID {target_job.id}: {e.response.status_code}"
+            f"HTTP error when downloading log zip for job ID {target_job.id} (likely from redirected URL): {e.response.status_code}"
         )
         print(f"Response content (first 500 chars): {e.response.text[:500]}...")
         raise RuntimeError(f"Failed to download log zip: HTTP {e.response.status_code}")
-    except Exception as e:
+    except (
+        requests.exceptions.RequestException
+    ) as e:  # Other requests-related errors (network, timeout, etc.)
+        print(
+            f"Network or request error when trying to download log zip for job ID {target_job.id}: {type(e).__name__} - {e}"
+        )
+        raise RuntimeError(f"Failed to download log zip due to a request error: {e}")
+    except Exception as e:  # Catch-all for other unexpected errors during download
         raise RuntimeError(
             f"An unexpected error occurred while trying to get log zip for job ID {target_job.id}: {type(e).__name__} {e}"
         )
 
     try:
-        with zipfile.ZipFile(io.BytesIO(log_zip_response.content)) as zf:
+        with zipfile.ZipFile(io.BytesIO(zip_content_bytes)) as zf:
             log_file_names = zf.namelist()
             if not log_file_names:
                 print(
@@ -222,7 +242,7 @@ def get_job_logs(job_name: str) -> str:
 
             print(f"Files found in log archive: {', '.join(log_file_names)}")
             log_content_parts = []
-            for file_name_in_zip in sorted(log_file_names):  # Sort for consistent order
+            for file_name_in_zip in sorted(log_file_names):
                 print(f"  Reading content from archived file: {file_name_in_zip}")
                 if len(log_file_names) > 1 and len(log_content_parts) > 0:
                     log_content_parts.append(
@@ -252,13 +272,13 @@ def get_job_logs(job_name: str) -> str:
             )
             return final_log_content
     except zipfile.BadZipFile:
-        content_preview = log_zip_response.content[:500]
+        content_preview = zip_content_bytes[:500]
         try:
             content_preview_text = content_preview.decode("utf-8", errors="replace")
         except:
-            content_preview_text = str(content_preview)
+            content_preview_text = str(content_preview)  # Fallback if decode fails
         print(
-            f"Error: Downloaded content for job ID {target_job.id} is not a valid ZIP archive. Preview: {content_preview_text}"
+            f"Error: Downloaded content for job ID {target_job.id} is not a valid ZIP archive. Preview of bytes: {content_preview_text}"
         )
         raise RuntimeError(
             "Failed to process logs: downloaded content was not a valid ZIP archive."
@@ -273,16 +293,15 @@ def get_llm(llm_provider: str, api_key: str) -> Any:
     """Initialize LLM with structured output support"""
     if llm_provider == "gemini":
         return ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash-latest", temperature=0, google_api_key=api_key
+            model="gemini-1.5-flash-latest",
+            temperature=0,
+            google_api_key=api_key,  # Corrected param name
         )
     elif llm_provider == "openai":
         return ChatOpenAI(model="gpt-4-turbo", temperature=0, api_key=api_key).bind(
             response_format={"type": "json_object"}
         )
     elif llm_provider == "anthropic":
-        # This is a placeholder. You'll need to install and import langchain_anthropic
-        # from langchain_anthropic import ChatAnthropic
-        # return ChatAnthropic(model="claude-3-opus-20240229", temperature=0, api_key=api_key)
         raise ValueError(
             f"Anthropic provider selected but its implementation is currently commented out in get_llm."
         )
@@ -326,13 +345,13 @@ def generate_validation_commands(llm: Any, logs: str) -> List[str]:
         chain = prompt | structured_llm
         print("Invoking LLM to generate validation commands...")
         response = chain.invoke({"logs": logs})
-        if (
-            not hasattr(response, "commands") or not response.commands
-        ):  # Check attribute and content
+        if not hasattr(response, "commands") or not isinstance(response.commands, list):
             print(
-                "Warning: LLM generated an empty list of commands or response format is incorrect."
+                f"Warning: LLM response format is incorrect or 'commands' is not a list. Response: {response}"
             )
             return []
+        if not response.commands:
+            print("Warning: LLM generated an empty list of commands.")
         return response.commands
     except Exception as e:
         print(f"Error during LLM command generation: {type(e).__name__} - {str(e)}")
@@ -358,7 +377,7 @@ def execute_validation(commands: List[str]) -> List[Dict[str, Any]]:
                 check=False,
                 timeout=60,
                 capture_output=True,
-                text=True,  # check=False to handle manually
+                text=True,
                 env=os.environ.copy(),
             )
             if process.returncode == 0:
@@ -398,13 +417,9 @@ def execute_validation(commands: List[str]) -> List[Dict[str, Any]]:
             print(f"##[error]⌛ Command {idx} TIMED OUT after {e.timeout} seconds")
             timeout_output = f"Command timed out after {e.timeout} seconds."
             if e.stdout:
-                timeout_output += (
-                    f"\nPartial STDOUT:\n{e.stdout.decode(errors='replace').strip()}"
-                )
+                timeout_output += f"\nPartial STDOUT:\n{e.stdout.decode(errors='replace').strip()}"  # stdout is bytes
             if e.stderr:
-                timeout_output += (
-                    f"\nPartial STDERR:\n{e.stderr.decode(errors='replace').strip()}"
-                )
+                timeout_output += f"\nPartial STDERR:\n{e.stderr.decode(errors='replace').strip()}"  # stderr is bytes
             results.append({"command": cmd, "passed": False, "output": timeout_output})
         except Exception as e_exec:
             print(
@@ -470,22 +485,35 @@ def set_github_outputs(outputs: Dict[str, Any]) -> None:
 
     print(f"##[group]📦 Setting GitHub Actions Outputs (to {github_output_file})")
     try:
-        with open(github_output_file, "a") as f:
+        with open(github_output_file, "a") as f:  # Open in append mode
             for key, value in outputs.items():
+                # Sanitize key for GitHub Actions
+                sanitized_key = key.replace(" ", "_").replace("-", "_")
+
                 if isinstance(value, (dict, list)):
                     json_value = json.dumps(value)
-                    delimiter = f"EOF_{key.upper().replace('-', '_')}"
-                    print(f"Setting output: {key} (JSON content)")
-                    f.write(f"{key}<<{delimiter}\n{json_value}\n{delimiter}\n")
+                    # Use heredoc format for multiline JSON
+                    delimiter = f"EOF_{sanitized_key.upper()}"
+                    print(f"Setting output: {sanitized_key} (JSON content via heredoc)")
+                    f.write(
+                        f"{sanitized_key}<<{delimiter}\n{json_value}\n{delimiter}\n"
+                    )
                 elif isinstance(value, str) and (
-                    "\n" in value or "\r" in value or "%" in value
-                ):  # Special chars for multiline
-                    delimiter = f"EOF_{key.upper().replace('-', '_')}"
-                    print(f"Setting output: {key} (Multi-line/special char string)")
-                    f.write(f"{key}<<{delimiter}\n{value}\n{delimiter}\n")
+                    "\n" in value
+                    or "\r" in value
+                    or "%" in value
+                    or "'" in value
+                    or '"' in value
+                ):
+                    # Use heredoc for any string that might be problematic
+                    delimiter = f"EOF_{sanitized_key.upper()}"
+                    print(
+                        f"Setting output: {sanitized_key} (Multi-line/special char string via heredoc)"
+                    )
+                    f.write(f"{sanitized_key}<<{delimiter}\n{value}\n{delimiter}\n")
                 else:
-                    print(f"Setting output: {key} = {value}")
-                    f.write(f"{key}={value}\n")
+                    print(f"Setting output: {sanitized_key} = {value}")
+                    f.write(f"{sanitized_key}={value}\n")
         print("Successfully wrote outputs to GITHUB_OUTPUT.")
     except Exception as e:
         print(
@@ -545,16 +573,16 @@ def main() -> None:
 
         print("\n##[group]📊 Validation Summary")
         num_failed_commands = 0
-        if not results and commands:
+        if (
+            not results and commands
+        ):  # Commands were generated but execution yielded no results (e.g. all errored before appending)
             print(
-                "No validation results to display, though commands were generated (execution might have failed)."
+                "No validation results to display, though commands were generated. Assuming all failed if execution block had issues."
             )
-            num_failed_commands = len(
-                commands
-            )  # Assume all failed if no results but commands existed
-        elif not commands:
+            num_failed_commands = len(commands)
+        elif not commands:  # No commands were generated in the first place
             print("No validation commands were generated or executed.")
-        else:
+        else:  # Results exist
             table_data = []
             for i, result in enumerate(results, 1):
                 status = "✅ PASS" if result["passed"] else "❌ FAIL"
@@ -578,26 +606,33 @@ def main() -> None:
             )
         print("##[endgroup]")
 
-        passed_all = num_failed_commands == 0 if results or commands else True
+        passed_all = (
+            num_failed_commands == 0 if (results or commands) else True
+        )  # True if no commands were ever intended/generated
         success_rate = 0.0
-        if results:
+        if results:  # Calculate success rate only if there were results
             success_rate = (
                 (len(results) - num_failed_commands) / len(results)
                 if len(results) > 0
                 else 1.0
             )
-        elif not commands:
-            success_rate = 1.0  # No commands, so 100% success of doing nothing.
+        elif not commands:  # No commands to run means 100% success of doing nothing.
+            success_rate = 1.0
 
         github_outputs = {
-            "validation_commands_generated": commands,
-            "validation_results_summary": [
+            "validation_commands_generated": commands,  # List of strings
+            "validation_results_summary": [  # List of objects
                 {
                     "command": r["command"],
                     "status": "passed" if r["passed"] else "failed",
+                    "output_snippet": (
+                        r.get("output", "")[:200] + "..."
+                        if len(r.get("output", "")) > 200
+                        else r.get("output", "")
+                    ),
                 }
                 for r in results
-            ],  # More concise summary
+            ],
             "overall_status": "success" if passed_all else "failure",
             "passed_command_count": (
                 len(results) - num_failed_commands if results else 0
@@ -609,18 +644,18 @@ def main() -> None:
         }
         set_github_outputs(github_outputs)
 
-        if not passed_all and (results or commands):
+        if not passed_all and (
+            results or commands
+        ):  # Only trigger failure strategy if commands were attempted
             handle_failure(args.failure_strategy, num_failed_commands)
 
         print("✅ AI-Powered Infrastructure Validation script completed.")
-        if not passed_all and not (
-            results or commands
-        ):  # Edge case: no commands, but logic implies failure path if not passed_all
+        if not passed_all and not (results or commands):
             print(
-                "Note: 'passed_all' is false but no commands were run; typically means an earlier setup issue not caught by failure strategy."
+                "Note: 'passed_all' is false but no commands were run/generated; this might indicate an earlier setup issue not caught by the failure strategy or empty logs leading to no commands."
             )
 
-    except ValueError as ve:
+    except ValueError as ve:  # Config/setup errors
         print(f"##[error]Configuration Error: {str(ve)}")
         set_github_outputs(
             {
@@ -630,7 +665,7 @@ def main() -> None:
             }
         )
         sys.exit(10)
-    except RuntimeError as rte:
+    except RuntimeError as rte:  # Operational errors within the script's logic
         print(f"##[error]Runtime Error: {str(rte)}")
         set_github_outputs(
             {
@@ -640,7 +675,7 @@ def main() -> None:
             }
         )
         sys.exit(20)
-    except Exception as e:
+    except Exception as e:  # Any other unhandled critical error
         import traceback
 
         print(f"##[error]❌ Critical Unhandled Error: {type(e).__name__} - {str(e)}")
@@ -648,7 +683,7 @@ def main() -> None:
         set_github_outputs(
             {
                 "overall_status": "error",
-                "error_message": str(e),
+                "error_message": f"{type(e).__name__}: {str(e)}",
                 "infrastructure_status": "unknown",
             }
         )
