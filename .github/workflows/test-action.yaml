@@ -11,14 +11,13 @@ on:
       - "action.yaml"
 
 jobs:
-  infrastructure-validation:
-    name: "Validate Terraform Security"
+  create_infrastructure:
+    name: "Create Test Infrastructure"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
+    timeout-minutes: 20
     permissions:
-      id-token: write  # For OIDC
-      contents: read
+      id-token: write  # Required for OIDC authentication with AWS
+      contents: read   # Required to checkout the repository
 
     steps:
       - name: "Checkout repository"
@@ -29,7 +28,8 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_TEST_ROLE_ARN }}
           aws-region: us-west-2
-          role-session-name: heimdall-test-${{ github.run_id }}
+          # Using a unique session name for each job run part
+          role-session-name: heimdall-create-${{ github.run_id }}
 
       - name: "Setup Terraform"
         uses: hashicorp/setup-terraform@v3
@@ -38,6 +38,7 @@ jobs:
           terraform_wrapper: false
 
       - name: "Initialize Test Infrastructure"
+        id: init
         working-directory: ./terraform/environments/test
         run: |
           terraform init -input=false
@@ -48,27 +49,106 @@ jobs:
         working-directory: ./terraform/environments/test
         run: |
           terraform apply -auto-approve -input=false
+          # Create the Terraform output file that the validation job will use
           terraform output -json > tf_output.json
 
+      - name: "Upload Terraform Output Artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: tf_output_data
+          path: ./terraform/environments/test/tf_output.json
+          retention-days: 1
+
+  validate_infrastructure:
+    name: "Validate Infrastructure Security"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # This job depends on the successful completion of the 'create_infrastructure' job
+    needs: create_infrastructure
+    permissions:
+      id-token: write  # Heimdall action needs AWS credentials
+      contents: read   # Required to checkout the repository for `uses: ./`
+    steps:
+      - name: "Checkout repository"
+        # Necessary because `uses: ./` refers to an action in this repository
+        uses: actions/checkout@v4
+
+      - name: "Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_TEST_ROLE_ARN }}
+          aws-region: us-west-2
+          role-session-name: heimdall-validate-${{ github.run_id }}
+
+      - name: "Download Terraform Output Artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: tf_output_data # Must match the upload name
+          path: ./downloaded_tf_output
+
       - name: "Validate Infrastructure Security"
-        uses: ./
+        uses: ./  # Use the action defined in action.yaml at the root of the repository
         id: security-check
         with:
-          tf_apply_job: deploy
+          # Assuming your custom action accepts a 'tf_output_file' input.
+          # This is a common pattern and preferable to relying on step IDs from other jobs.
+          # If your action uses a different input name for the Terraform output JSON, adjust accordingly.
+          tf_apply_job_id: ./downloaded_tf_output/tf_output.json
           llm_provider: "gemini"
           api_key: "${{ secrets.HEIMDALL_TEST_KEY }}"
           failure_strategy: "alert-only"
 
       - name: "Evaluate Validation Results"
+        # This step runs regardless of the outcome of 'security-check' step within this job.
+        # This is important if 'failure_strategy: alert-only' means 'security-check' always passes.
         if: always()
         run: |
+          echo "Security check raw outputs: ${{ toJson(steps.security-check.outputs) }}"
+          # Check the specific output from your Heimdall action that indicates validation status
           if [[ "${{ steps.security-check.outputs.infrastructure_status }}" != "validated" ]]; then
-            echo "::error::Validation failed: ${{ steps.security-check.outputs.execution_logs }}"
-            exit 1
+            echo "::error::Infrastructure security validation failed. Logs: ${{ steps.security-check.outputs.execution_logs }}"
+            exit 1 # Explicitly fail the job if validation was not successful
           fi
           echo "✅ Infrastructure validation passed"
 
+  destroy_infrastructure:
+    name: "Destroy Test Infrastructure"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # `if: always()` ensures this job runs even if 'create_infrastructure' or 'validate_infrastructure' fails.
+    if: always()
+    # `needs` ensures this job waits for the specified jobs to complete before starting.
+    needs: [create_infrastructure, validate_infrastructure]
+    permissions:
+      id-token: write  # Required for OIDC authentication with AWS
+      contents: read   # Required to checkout the repository
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "Configure AWS Credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_TEST_ROLE_ARN }}
+          aws-region: us-west-2
+          role-session-name: heimdall-destroy-${{ github.run_id }}
+
+      - name: "Setup Terraform"
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.11.3" # Ensure consistency with the create_infrastructure job
+          terraform_wrapper: false
+
+      - name: "Initialize Terraform for Destroy"
+        # Terraform init is required in each job that runs terraform commands
+        # to set up the backend and providers, especially if using a remote state.
+        working-directory: ./terraform/environments/test
+        run: terraform init -input=false
+
       - name: "Destroy Test Resources"
-        if: always()
         working-directory: ./terraform/environments/test
         run: terraform destroy -auto-approve -input=false
+        # This command will attempt to destroy the infrastructure.
+        # Terraform destroy is generally idempotent. If creation failed partially or fully,
+        # it will attempt to destroy what it can based on the state file.
+        # If no resources were created or the state is empty, it should complete without error.

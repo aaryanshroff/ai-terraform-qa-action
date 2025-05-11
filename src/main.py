@@ -28,7 +28,7 @@ def parse_arguments() -> argparse.Namespace:
         description="AI-Powered Infrastructure Validation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("tf_apply_job", help="Name of the Terraform apply job")
+    parser.add_argument("tf_apply_job_id", help="Name of the Terraform apply job")
     parser.add_argument("llm_provider", choices=["openai", "anthropic", "gemini"])
     parser.add_argument("api_key", help="LLM provider API key")
     parser.add_argument("failure_strategy", choices=["rollback", "alert-only", "retry"])
@@ -180,7 +180,7 @@ def main() -> None:
 
         # Get logs from Terraform apply job
         print("##[group]📥 Retrieving Terraform Logs")
-        raw_logs = get_job_logs(args.tf_apply_job)
+        raw_logs = get_job_logs(args.tf_apply_job_id)
         print(f"Retrieved {len(raw_logs.splitlines())} lines of logs")
         print("##[endgroup]")
 
