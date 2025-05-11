@@ -153,7 +153,7 @@ def get_job_logs(job_name: str) -> str:
         if job.name == job_name:
             target_job = job
             print(
-                f"Found target job: '{target_job.name}' (ID: {target_job.id}, Status: '{target_job.status}', Logs URL: {target_job.logs_url})"
+                f"Found target job: '{target_job.name}' (ID: {target_job.id}, Status: '{target_job.status}', Logs URL: {target_job.logs_url()})"
             )
             break
 
@@ -172,7 +172,7 @@ def get_job_logs(job_name: str) -> str:
         )
 
     print(
-        f"Attempting to download logs for job '{target_job.name}' (ID: {target_job.id}) using logs_url: {target_job.logs_url}"
+        f"Attempting to download logs for job '{target_job.name}' (ID: {target_job.id}) using logs_url: {target_job.logs_url()}"
     )
     zip_content_bytes: bytes
     try:
@@ -180,7 +180,7 @@ def get_job_logs(job_name: str) -> str:
         # The logs_url for a job points to an API endpoint that typically redirects to the actual log archive.
         # requestBlob is expected to handle authentication and follow redirects, returning a requests.Response object.
         log_zip_response_obj = target_job._requester.requestBlob(
-            "GET", target_job.logs_url
+            "GET", target_job.logs_url()
         )
 
         # Check if the final download was successful (e.g., after following redirects)
@@ -202,7 +202,7 @@ def get_job_logs(job_name: str) -> str:
             else str(e.data)
         )
         print(
-            f"GitHub API error when trying to get log zip for job ID {target_job.id} from {target_job.logs_url}: Status {e.status}, Message: {error_message}"
+            f"GitHub API error when trying to get log zip for job ID {target_job.id} from {target_job.logs_url()}: Status {e.status}, Message: {error_message}"
         )
         if e.status == 403:
             print(
