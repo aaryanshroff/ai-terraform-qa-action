@@ -90,10 +90,7 @@ jobs:
         uses: ./  # Use the action defined in action.yaml at the root of the repository
         id: security-check
         with:
-          # Assuming your custom action accepts a 'tf_output_file' input.
-          # This is a common pattern and preferable to relying on step IDs from other jobs.
-          # If your action uses a different input name for the Terraform output JSON, adjust accordingly.
-          tf_apply_job_id: ./downloaded_tf_output/tf_output.json
+          tf_apply_job_name: Create Test Infrastructure
           llm_provider: "gemini"
           api_key: "${{ secrets.HEIMDALL_TEST_KEY }}"
           failure_strategy: "alert-only"
