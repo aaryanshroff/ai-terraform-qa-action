@@ -9,7 +9,7 @@ brand:
   color: "blue-purple"
 
 inputs:
-  tf_apply_job:
+  tf_apply_job_name:
     description: "Name of GitHub job that ran 'terraform apply'"
     required: true
     default: "apply"
@@ -51,7 +51,7 @@ runs:
   using: "docker"
   image: "Dockerfile"
   args:
-    - "${{ inputs.tf_apply_job }}"
+    - "${{ inputs.tf_apply_job_name }}"
     - "${{ inputs.llm_provider }}"
     - "${{ inputs.api_key }}"
     - "${{ inputs.failure_strategy }}"
