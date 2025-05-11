@@ -174,7 +174,7 @@ def get_job_logs(job_name: str) -> str:
     print(
         f"Attempting to download logs for job '{target_job.name}' (ID: {target_job.id}) using logs_url: {target_job.logs_url()}"
     )
-    zip_content_bytes: bytes
+    final_log_content: str = ""
     try:
         print(f"Requesting log archive from: {target_job.logs_url()}")
 
@@ -189,9 +189,9 @@ def get_job_logs(job_name: str) -> str:
         # This will raise an HTTPError if the final download fails
         log_download_response.raise_for_status()
 
-        zip_content_bytes = log_download_response.content
+        final_log_content = log_download_response.content
         print(
-            f"Successfully downloaded log archive (Final URL: {log_download_response.url}, Status: {log_download_response.status_code}, Size: {len(zip_content_bytes)} bytes)."
+            f"Successfully downloaded log archive (Final URL: {log_download_response.url}, Status: {log_download_response.status_code}, Size: {len(final_log_content)} chars)."
         )
 
     except requests.exceptions.Timeout as e:
@@ -226,62 +226,7 @@ def get_job_logs(job_name: str) -> str:
             f"An unexpected error occurred while trying to get/process log zip for job ID {target_job.id}: {type(e).__name__} {e}"
         )
 
-    try:
-        with zipfile.ZipFile(io.BytesIO(zip_content_bytes)) as zf:
-            log_file_names = zf.namelist()
-            if not log_file_names:
-                print(
-                    "Warning: The downloaded log archive is empty (contains no files)."
-                )
-                return ""
-
-            print(f"Files found in log archive: {', '.join(log_file_names)}")
-            log_content_parts = []
-            for file_name_in_zip in sorted(log_file_names):
-                print(f"  Reading content from archived file: {file_name_in_zip}")
-                if len(log_file_names) > 1 and len(log_content_parts) > 0:
-                    log_content_parts.append(
-                        f"\n--- Log content from: {file_name_in_zip} ---\n"
-                    )
-
-                file_content_bytes = zf.read(file_name_in_zip)
-                try:
-                    log_content_parts.append(
-                        file_content_bytes.decode("utf-8", errors="replace")
-                    )
-                except Exception as e_decode:
-                    log_content_parts.append(
-                        f"\n--- Error decoding {file_name_in_zip} as UTF-8: {e_decode} ---\n"
-                    )
-                    print(
-                        f"Warning: Could not decode file '{file_name_in_zip}' as UTF-8: {e_decode}."
-                    )
-
-            final_log_content = "".join(log_content_parts)
-            if not final_log_content.strip():
-                print(
-                    "Warning: Extracted log content is empty or contains only whitespace."
-                )
-            print(
-                f"Successfully extracted and decoded logs. Total length: {len(final_log_content)} characters."
-            )
-            return final_log_content
-    except zipfile.BadZipFile:
-        content_preview = zip_content_bytes[:500]
-        try:
-            content_preview_text = content_preview.decode("utf-8", errors="replace")
-        except:
-            content_preview_text = str(content_preview)  # Fallback if decode fails
-        print(
-            f"Error: Downloaded content for job ID {target_job.id} is not a valid ZIP archive. Preview of bytes: {content_preview_text}"
-        )
-        raise RuntimeError(
-            "Failed to process logs: downloaded content was not a valid ZIP archive."
-        )
-    except Exception as e:
-        raise RuntimeError(
-            f"Failed to extract or decode logs from archive for job ID {target_job.id}: {type(e).__name__} {e}"
-        )
+    return final_log_content
 
 
 def get_llm(llm_provider: str, api_key: str) -> Any:
