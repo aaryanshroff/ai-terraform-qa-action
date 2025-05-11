@@ -94,6 +94,8 @@ jobs:
           llm_provider: "gemini"
           api_key: "${{ secrets.HEIMDALL_TEST_KEY }}"
           failure_strategy: "alert-only"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "Evaluate Validation Results"
         # This step runs regardless of the outcome of 'security-check' step within this job.
