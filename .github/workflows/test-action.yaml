@@ -90,7 +90,7 @@ jobs:
         uses: ./  # Use the action defined in action.yaml at the root of the repository
         id: security-check
         with:
-          tf_apply_job_name: Create Test Infrastructure
+          tf_apply_job_name: "Create Test Infrastructure"
           llm_provider: "gemini"
           api_key: "${{ secrets.HEIMDALL_TEST_KEY }}"
           failure_strategy: "alert-only"

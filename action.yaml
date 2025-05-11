@@ -9,7 +9,7 @@ brand:
   color: "blue-purple"
 
 inputs:
-  tf_apply_job:
+  tf_apply_job_name:
     description: "Name of GitHub job that ran 'terraform apply'"
     required: true
     default: "apply"
