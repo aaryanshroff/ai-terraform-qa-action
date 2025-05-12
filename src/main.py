@@ -11,7 +11,7 @@ from tabulate import tabulate
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments matching action.yml specs"""
     parser = argparse.ArgumentParser(
-        description="QA Copilot for Infrastructure Validation",
+        description="Heimdall AI: Terraform configuration validation and security analysis",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
